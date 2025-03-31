@@ -8,7 +8,7 @@
 //    return result;
 //}
 //(devicePoints, deviceClusters, returnClusterNum, numDimensions, numClusters, numPoints);
-__global__ void findClusters(float *devicePoints, float *deviceClusters,int *returnClusterNum , int numDimensions, int numClusters, int numPoints){
+__global__ void findClusters(double *devicePoints, double *deviceClusters,int *returnClusterNum , int numDimensions, int numClusters, int numPoints){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     //if(idx < size){
     //    deviceArray[idx] = adding(idx, deviceArray[idx]);
@@ -16,7 +16,7 @@ __global__ void findClusters(float *devicePoints, float *deviceClusters,int *ret
     //}
 
 
-    float sum = 0.0, min_dist;
+    double sum = 0.0, min_dist;
 	int id_cluster_center = 0;
 
 	for(int i = 0; i < numDimensions; i++){
@@ -50,24 +50,24 @@ int main() {
     int numClusters = 3;
     int numPoints = 5;
     //float arrayPoints[];
-    std::vector<std::vector<float>> points = {
+    std::vector<std::vector<double>> points = {
         {8.8, 9.9, 0.0, 1.1},
-        {2.1, 4.3, 6.5, 8.7},
+        {3.2, 3.4, 7.6, 2.8},
         {4.4, 5.5, 6.6, 7.7},
         {4.4, 5.5, 6.6, 7.7},
         {8.8, 9.9, 0.0, 1.1}
     };
-    std::vector<std::vector<float>> clusters = {
+    std::vector<std::vector<double>> clusters = {
         {3.2, 3.4, 7.6, 2.8},
         {4.4, 5.5, 6.6, 7.7},
         {8.8, 9.9, 0.0, 1.1},
     };
     int pointsLengthNeeded = numDimensions * numPoints;
     int clustersLengthNeeded = numDimensions * numClusters;
-    float pointsArray[pointsLengthNeeded];
-    float clustersArray[clustersLengthNeeded];
-    float *devicePoints;
-    float *deviceClusters;
+    double pointsArray[pointsLengthNeeded];
+    double clustersArray[clustersLengthNeeded];
+    double *devicePoints;
+    double *deviceClusters;
     int *returnClusterNum;
     
     for(int i = 0; i < numPoints; i++){
@@ -85,13 +85,13 @@ int main() {
 
 
     //this stuff allocates the memory needed for the array
-    cudaMalloc((void**)&devicePoints, pointsLengthNeeded * sizeof(float));
-    cudaMalloc((void**)&deviceClusters, clustersLengthNeeded * sizeof(float));
+    cudaMalloc((void**)&devicePoints, pointsLengthNeeded * sizeof(double));
+    cudaMalloc((void**)&deviceClusters, clustersLengthNeeded * sizeof(double));
     cudaMalloc((void**)&returnClusterNum, numPoints * sizeof(int));
 
     //yo basically this just copies the data from the host array to the device array to the position that is already allocated and it will be used
-    cudaMemcpy(devicePoints, pointsArray, pointsLengthNeeded * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(deviceClusters, clustersArray, clustersLengthNeeded * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(devicePoints, pointsArray, pointsLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(deviceClusters, clustersArray, clustersLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
 
     //this is one block of 10 threads - try multiple blocks and just get an understanding of it more than high level
     findClusters<<<1, numPoints>>>(devicePoints, deviceClusters, returnClusterNum, numDimensions, numClusters, numPoints);
