@@ -13,19 +13,32 @@
 __global__ void calculateClusterCenter(float *devicePoints, int *deviceClusterAssignments, float *deviceClusters, int numDimensions, int numClusters, int numPoints){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
+    //for(int i = 0; i < 5; i++){
+    //    printf("%d ",deviceClusterAssignments[i]);
+    //}
     int counter = 0;
-    for(int i = 0; i < numPoints; i++){
-        if(deviceClusterAssignments[i] == idx){
-            for(int j = 0; j < numDimensions; j++){
-                deviceClusters[idx * numDimensions + j] += devicePoints[i * numDimensions + j];
+    if(idx < numClusters){
+        for(int i = 0; i < numPoints; i++){
+            if(deviceClusterAssignments[i] == idx){
+                printf("Compare: %d, %d, %d\n", deviceClusterAssignments[i], idx, i);
+                //printf("----------\n");
+                for(int j = 0; j < numDimensions; j++){
+                    //printf("Cluster %d, Dimension: %d, Value: %f\n",idx, j, devicePoints[i * numDimensions + j]);
+                    deviceClusters[idx * numDimensions + j] += devicePoints[i * numDimensions + j];
+                }
+                counter++;
+                //printf("MAIN: Cluster %d, Dimension: %d, Value: %f\n",idx, j, devicePoints[i * numDimensions + j]);
             }
-            counter++;
         }
-    }
 
-    for(int i = 0; i < numDimensions; i++){
-        printf("Cluster %d, Value: %f\n",idx, deviceClusters[idx * numDimensions + numDimensions]);
-        deviceClusters[idx * numDimensions + numDimensions] = deviceClusters[idx * numDimensions + numDimensions] / counter;
+        if(counter > 0){
+            for(int i = 0; i < numDimensions; i++){
+                //printf("Cluster %d, Value: %f\n",idx, deviceClusters[idx * numDimensions + numDimensions]);
+                deviceClusters[idx * numDimensions + i] = deviceClusters[idx * numDimensions + i] / counter;
+            }
+
+        }
+
     }
 
 
@@ -71,9 +84,9 @@ int main() {
         {2.1, 4.3, 6.5, 8.7},
         {4.4, 5.5, 6.6, 7.7},
         {4.4, 5.5, 6.6, 7.7},
-        {8.8, 9.9, 0.0, 1.1}
+        {7.8, 7.9, 7.0, 7.1}
     };
-    std::vector<int> clusterAssignmentsIn = {1,1,2,1,0};
+    std::vector<int> clusterAssignmentsIn = {1,1,2,2,2};
     std::vector<std::vector<float>> clusters = {
         {3.2, 3.4, 7.6, 2.8},
         {4.4, 5.5, 6.6, 7.7},
@@ -84,7 +97,7 @@ int main() {
     int pointsLengthNeeded = numDimensions * numPoints;
     int clustersLengthNeeded = numDimensions * numClusters;
     float pointsArray[pointsLengthNeeded];
-    int clusterAssignmentsArray[numClusters];
+    int clusterAssignmentsArray[numPoints];
     //float clustersArray[clustersLengthNeeded];
     float *devicePoints;
     int *deviceClusterAssignments;
@@ -97,8 +110,9 @@ int main() {
         //changePoint++;
     }
 
-    for(int i = 0; i < numClusters; i++){
+    for(int i = 0; i < numPoints; i++){
         clusterAssignmentsArray[i] = clusterAssignmentsIn[i];//in the actual implementation just store everything in the array already so you dont need to copy it from vec to array plus the clusters calculations will just be in the same array you used
+        //printf("%d\n", clusterAssignmentsArray[i]);
     }
    // for(int i = 0; i < numClusters; i++){
     //    for(int j = 0; j < numDimensions; j++){
@@ -110,12 +124,12 @@ int main() {
 
     //this stuff allocates the memory needed for the array
     cudaMalloc((void**)&devicePoints, pointsLengthNeeded * sizeof(float));
-    cudaMalloc((void**)&deviceClusterAssignments, numClusters * sizeof(int));
+    cudaMalloc((void**)&deviceClusterAssignments, numPoints * sizeof(int));
     cudaMalloc((void**)&deviceClusters, clustersLengthNeeded * sizeof(float));
 
     //yo basically this just copies the data from the host array to the device array to the position that is already allocated and it will be used
     cudaMemcpy(devicePoints, pointsArray, pointsLengthNeeded * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(deviceClusterAssignments, clusterAssignmentsArray, numClusters * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(deviceClusterAssignments, clusterAssignmentsArray, numPoints * sizeof(int), cudaMemcpyHostToDevice);
 
     //this is one block of 10 threads - try multiple blocks and just get an understanding of it more than high level
     calculateClusterCenter<<<1, numClusters>>>(devicePoints, deviceClusterAssignments, deviceClusters, numDimensions, numClusters, numPoints);
