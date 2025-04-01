@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <iostream>
 #include <vector>
+#include <random>
 #include <cuda_runtime.h> //powf to use in cuda device main thing
 
 //__device__ int adding(int x, int y){
@@ -8,55 +9,27 @@
 //    return result;
 //}
 //(devicePoints, deviceClusters, returnClusterNum, numDimensions, numClusters, numPoints);
-__global__ void findClusters(double *devicePoints, double *deviceClusters,int *returnClusterNum , int numDimensions, int numClusters, int numPoints){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    //if(idx < size){
-    //    deviceArray[idx] = adding(idx, deviceArray[idx]);
 
-    //}
+std::vector<std::vector<double>> generatePoints(int numPoints, int dimensions) {
+    std::vector<std::vector<double>> points(numPoints, std::vector<double>(dimensions));
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<double> dis(0.0, 10.0);
 
-
-    double sum = 0.0, min_dist;
-	int id_cluster_center = 0;
-
-	for(int i = 0; i < numDimensions; i++){
-		//sum += pow(clusters[0].getCentralValue(i) - point.getValue(i), 2.0);
-        sum += powf(deviceClusters[i] - devicePoints[idx * numDimensions + i] , 2);
-	}
-
-	min_dist = sqrtf(sum);
-
-	for(int i = 1; i < numClusters; i++){
-		double dist;
-		sum = 0.0;
-
-		for(int j = 0; j < numDimensions; j++){
-			sum += powf(deviceClusters[i * numDimensions + j] - devicePoints[idx * numDimensions + j] , 2);
-		}
-
-		dist = sqrtf(sum);
-
-		if(dist < min_dist){
-			min_dist = dist;
-			id_cluster_center = i;
-		}
-	}
-    //printf("%d",id_cluster_center);
-	returnClusterNum[idx] = id_cluster_center;
+    for (int i = 0; i < numPoints; ++i) {
+        for (int j = 0; j < dimensions; ++j) {
+            points[i][j] = dis(gen);
+        }
+    }
+    return points;
 }
 
 int main() {
     int numDimensions = 4;
     int numClusters = 3;
-    int numPoints = 5;
+    int numPoints = 2024;
     //float arrayPoints[];
-    std::vector<std::vector<double>> points = {
-        {8.8, 9.9, 0.0, 1.1},
-        {3.2, 3.4, 7.6, 2.8},
-        {4.4, 5.5, 6.6, 7.7},
-        {4.4, 5.5, 6.6, 7.7},
-        {8.8, 9.9, 0.0, 1.1}
-    };
+    std::vector<std::vector<double>> points = generatePoints(numPoints, numDimensions);
     std::vector<std::vector<double>> clusters = {
         {3.2, 3.4, 7.6, 2.8},
         {4.4, 5.5, 6.6, 7.7},
@@ -74,13 +47,17 @@ int main() {
         for(int j = 0; j < numDimensions; j++){
             pointsArray[i * numDimensions + j] = points[i][j];
         }
-        //changePoint++;
     }
     for(int i = 0; i < numClusters; i++){
         for(int j = 0; j < numDimensions; j++){
             clustersArray[i * numDimensions + j] = clusters[i][j];
         }
     }
+
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    std::cout << "Max blocks per multiprocessor: " << prop.maxGridSize[0] << std::endl;
+    std::cout << "Max threads per block: " << prop.maxThreadsPerBlock << std::endl;
 
 
 
@@ -94,7 +71,7 @@ int main() {
     cudaMemcpy(deviceClusters, clustersArray, clustersLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
 
     //this is one block of 10 threads - try multiple blocks and just get an understanding of it more than high level
-    findClusters<<<1, numPoints>>>(devicePoints, deviceClusters, returnClusterNum, numDimensions, numClusters, numPoints);
+    findClusters<<<1000000, 1024>>>(devicePoints, deviceClusters, returnClusterNum, numDimensions, numClusters, numPoints);
     int clusterAssignments[numPoints];
     cudaMemcpy(clusterAssignments, returnClusterNum, numPoints * sizeof(int), cudaMemcpyDeviceToHost);
     
