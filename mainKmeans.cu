@@ -19,7 +19,39 @@ using namespace std;
 
 //kmeansRun(points, total_points, numDimensions, K, max_iterations);
 void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int numDimensions, int K, int max_iterations){
+    auto begin = chrono::high_resolution_clock::now();
+	if(K > total_points)
+		return;
 
+    int pointLengthNeeded = numDimensions * totalPoints;
+    double pointsArray[pointLengthNeeded];
+
+    for(int i = 0; i < totalPoints; i++){
+        for(int j = 0; j < numDimensions; j++){
+            pointsArray[i * numDimensions + j] = points[i][j];
+        }
+    }
+
+	vector<int> prohibited_indexes;
+
+    int clusterLengthNeeded = numDimensions * K;
+    double clustersArray[clusterLengthNeeded];
+
+	// choose K distinct values for the centers of the clusters
+	for(int i = 0; i < K; i++){
+		while(true){
+			int index_point = rand() % total_points;
+			if(find(prohibited_indexes.begin(), prohibited_indexes.end(),index_point) == prohibited_indexes.end()){
+				prohibited_indexes.push_back(index_point);
+                for(int j = 0; j < numDimensions; j++){
+                    clustersArray[i * numDimensions + j] = pointsArray[index_point * numDimensions + j];
+                }
+				break;
+			}
+		}
+	}
+
+    
 }
 
 int main()//int argc, char *argv[])
