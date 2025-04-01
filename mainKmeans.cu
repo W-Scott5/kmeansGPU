@@ -15,6 +15,7 @@
 #include <chrono>
 #include <fstream>
 #include <mutex>
+#include <cuda_runtime.h>
 using namespace std;
 
 //findClusters<<<1000, 1024>>>(devicePoints, deviceClusters, returnClusterNum, numDimensions, K, totalPoints);
@@ -43,6 +44,8 @@ __global__ void findClusters(double *devicePoints, double *deviceClusters,int *d
 
             dist = sqrtf(sum);
 
+			printf("dist: %f\n", dist);
+			printf("min: %f\n", min_dist);
             if(dist < min_dist){
                 min_dist = dist;
                 id_cluster_center = i;
@@ -51,17 +54,23 @@ __global__ void findClusters(double *devicePoints, double *deviceClusters,int *d
         deviceClusterAssignments[idx] = id_cluster_center;
     }
 }
-
+//calculateClusterCenter<<<1, 4>>>(devicePoints, deviceClusterAssignments, deviceClusters, numDimensions, K, totalPoints);
 __global__ void calculateClusterCenter(double *devicePoints, int *deviceClusterAssignments, double *deviceClusters, int numDimensions, int numClusters, int numPoints){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
+	//printf("idx: %d\n", idx);
+	int counter = 0;
+	
     if(idx < numClusters){
         //printf("%d",idx);
-        int counter = 0;
         for(int i = 0; i < numPoints; i++){
             if(deviceClusterAssignments[i] == idx){
                 for(int j = 0; j < numDimensions; j++){
+                    if(counter == 0){
+                        deviceClusters[idx * numDimensions + j] = 0;
+                    }
+					
                     deviceClusters[idx * numDimensions + j] += devicePoints[i * numDimensions + j];
+                    printf("cluter: %d, test: %f\n", idx, deviceClusters[idx * numDimensions + j]);
                 }
                 counter++;
             }
@@ -88,6 +97,9 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
             pointsArray[i * numDimensions + j] = points[i][j];
         }
     }
+	for(int i = 0; i < pointsLengthNeeded; i++){
+		printf("%f ", pointsArray[i]);
+	}
 
 	vector<int> prohibited_indexes;
 
@@ -107,6 +119,8 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
 			}
 		}
 	}
+	printf("cluster 0: %d\n", prohibited_indexes[0]);
+	printf("cluster 1: %d\n", prohibited_indexes[1]);
 
     auto end_phase1 = chrono::high_resolution_clock::now();
 
@@ -134,11 +148,11 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
         //yo basically this just copies the data from the host array to the device array to the position that is already allocated and it will be used
 
         //this is one block of 10 threads - try multiple blocks and just get an understanding of it more than high level
-        findClusters<<<20, 1024>>>(devicePoints, deviceClusters, deviceClusterAssignments, numDimensions, K, totalPoints);
+        findClusters<<<1, 1024>>>(devicePoints, deviceClusters, deviceClusterAssignments, numDimensions, K, totalPoints);
 
 		cudaDeviceSynchronize();
 
-		calculateClusterCenter<<<1, 4>>>(devicePoints, deviceClusterAssignments, deviceClusters, numDimensions, K, totalPoints);
+		calculateClusterCenter<<<1, 10>>>(devicePoints, deviceClusterAssignments, deviceClusters, numDimensions, K, totalPoints);
 
 		cudaDeviceSynchronize();
 
@@ -186,7 +200,7 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
 			});*/
 
 		//printf("max: %d\n", max_iterations);
-		if(iter >= max_iterations){
+		if(iter >= 7){
 			cout << "Break in iteration " << iter << "\n";
 			break;
 		}
@@ -223,9 +237,9 @@ int main()//int argc, char *argv[])
 	//if(argc == 0){
 	//	cout << "wow" << endl;
 	//}
-	srand(0);//atoi(argv[1]));
+	srand(741);//atoi(argv[1]));
 
-	std::ifstream dataFile("../datasets/Dry_Bean_Dataset.txt");
+	std::ifstream dataFile("../datasets/dataset1.txt");
 	int total_points, numDimensions, K, max_iterations, has_name;
 
 	dataFile >> total_points >> numDimensions >> K >> max_iterations >> has_name;
