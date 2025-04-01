@@ -44,8 +44,8 @@ __global__ void findClusters(double *devicePoints, double *deviceClusters,int *d
 
             dist = sqrtf(sum);
 
-			printf("dist: %f\n", dist);
-			printf("min: %f\n", min_dist);
+			//printf("dist: %f\n", dist);
+			//printf("min: %f\n", min_dist);
             if(dist < min_dist){
                 min_dist = dist;
                 id_cluster_center = i;
@@ -70,14 +70,14 @@ __global__ void calculateClusterCenter(double *devicePoints, int *deviceClusterA
                     }
 					
                     deviceClusters[idx * numDimensions + j] += devicePoints[i * numDimensions + j];
-                    printf("cluter: %d, test: %f\n", idx, deviceClusters[idx * numDimensions + j]);
+                    //printf("cluter: %d, test: %f\n", idx, deviceClusters[idx * numDimensions + j]);
                 }
                 counter++;
             }
         }
         if(counter > 0){
             for(int i = 0; i < numDimensions; i++){
-                deviceClusters[idx * numDimensions + i] = deviceClusters[idx * numDimensions + i] / counter;
+                deviceClusters[idx * numDimensions + i] = deviceClusters[idx * numDimensions + i] / (counter * 1.0);
             }
         }
     }
@@ -97,9 +97,9 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
             pointsArray[i * numDimensions + j] = points[i][j];
         }
     }
-	for(int i = 0; i < pointsLengthNeeded; i++){
-		printf("%f ", pointsArray[i]);
-	}
+	//for(int i = 0; i < pointsLengthNeeded; i++){
+	//	printf("%f ", pointsArray[i]);
+	//}
 
 	vector<int> prohibited_indexes;
 
@@ -119,8 +119,8 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
 			}
 		}
 	}
-	printf("cluster 0: %d\n", prohibited_indexes[0]);
-	printf("cluster 1: %d\n", prohibited_indexes[1]);
+	//printf("cluster 0: %d\n", prohibited_indexes[0]);
+	//printf("cluster 1: %d\n", prohibited_indexes[1]);
 
     auto end_phase1 = chrono::high_resolution_clock::now();
 
@@ -141,6 +141,20 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
     cudaMemcpy(devicePoints, pointsArray, pointsLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(deviceClusters, clustersArray, clustersLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
     //cudaMemcpy(clusterAssignments, returnClusterNum, totalPoints * sizeof(int), cudaMemcpyDeviceToHost);
+    int numBlocksPoints = 1;
+    int threadPoints = 1024;
+    if(totalPoints > 1024){
+        numBlocksPoints = totalPoints / 1024 + 1;
+    } else {
+        threadPoints = totalPoints;
+    }
+    int numBlocksClusters = 1;
+    int threadClusters = 1024;
+    if(K > 1024){
+        numBlocksClusters = K / 1024 + 1;
+    } else {
+        threadClusters = K;
+    }
 
 	while(true){
 		//bool done = false;
@@ -148,11 +162,11 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
         //yo basically this just copies the data from the host array to the device array to the position that is already allocated and it will be used
 
         //this is one block of 10 threads - try multiple blocks and just get an understanding of it more than high level
-        findClusters<<<1, 1024>>>(devicePoints, deviceClusters, deviceClusterAssignments, numDimensions, K, totalPoints);
+        findClusters<<<numBlocksPoints, threadPoints>>>(devicePoints, deviceClusters, deviceClusterAssignments, numDimensions, K, totalPoints);
 
 		cudaDeviceSynchronize();
 
-		calculateClusterCenter<<<1, 10>>>(devicePoints, deviceClusterAssignments, deviceClusters, numDimensions, K, totalPoints);
+		calculateClusterCenter<<<numBlocksClusters, threadClusters>>>(devicePoints, deviceClusterAssignments, deviceClusters, numDimensions, K, totalPoints);
 
 		cudaDeviceSynchronize();
 
@@ -200,7 +214,7 @@ void kmeansRun(std::vector<std::vector<double>> points, int totalPoints, int num
 			});*/
 
 		//printf("max: %d\n", max_iterations);
-		if(iter >= 7){
+		if(iter >= max_iterations){
 			cout << "Break in iteration " << iter << "\n";
 			break;
 		}
@@ -239,7 +253,7 @@ int main()//int argc, char *argv[])
 	//}
 	srand(741);//atoi(argv[1]));
 
-	std::ifstream dataFile("../datasets/dataset1.txt");
+	std::ifstream dataFile("../datasets/Dry_Bean_Dataset.txt");
 	int total_points, numDimensions, K, max_iterations, has_name;
 
 	dataFile >> total_points >> numDimensions >> K >> max_iterations >> has_name;
