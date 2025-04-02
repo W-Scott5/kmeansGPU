@@ -80,7 +80,6 @@ __global__ void calculateClusterCenter(double *devicePoints, int *deviceClusterA
                     if(counter == 0){
                         deviceClusters[idx * numDimensions + j] = 0;
                     }
-					
                     deviceClusters[idx * numDimensions + j] += devicePoints[i * numDimensions + j];
                     //printf("cluter: %d, test: %f\n", idx, deviceClusters[idx * numDimensions + j]);
                 }
@@ -92,11 +91,10 @@ __global__ void calculateClusterCenter(double *devicePoints, int *deviceClusterA
                 deviceClusters[idx * numDimensions + i] = deviceClusters[idx * numDimensions + i] / (counter * 1.0);
             }
         }
+        changedCluster[idx] = 0;
     }
     if(idx == 0){
-        for(int i = 0; i < numClusters+1; i++){
-            deviceClusterAssignments[i] = 0;
-        }
+        changedCluster[numClusters] = 0;
     }
 }
 
