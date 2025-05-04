@@ -109,15 +109,16 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     int pointsLengthNeeded = numDimensions * totalPoints;
 
 	vector<int> prohibited_indexes;
-    std::cout << "here 2" << std::endl;
+    //std::cout << "here 2" << std::endl;
 
     int clustersLengthNeeded = numDimensions * K;
     double clustersArray[clustersLengthNeeded];
     double clustersArrayTotals[clustersLengthNeeded];
     int clustersAmountPoints[K+1];
-    std::cout << "here 3.1" << std::endl;
-    int clusterAssignments[totalPoints];
-    std::cout << "here 3" << std::endl;
+    //std::cout << "here 3.1" << std::endl;
+    int* clusterAssignments = (int*)malloc(totalPoints * sizeof(int));
+    //int clusterAssignments[totalPoints];
+    //std::cout << "here 3" << std::endl;
 
     for(int i = 0; i < totalPoints; i++){
         clusterAssignments[i] = -1;
@@ -146,7 +147,7 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     double *deviceClustersTotals;
     int *deviceClusterAssignments;
     int *clusterAmount;
-    std::cout << "here" << std::endl;
+    //std::cout << "here" << std::endl;
 
     cudaMalloc((void**)&devicePoints, pointsLengthNeeded * sizeof(double));
     cudaMalloc((void**)&deviceClusters, clustersLengthNeeded * sizeof(double));
@@ -178,8 +179,8 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     }
     int testChange[K+1];
 
+    //std::cout << "here" << std::endl;
     end_phase1 = chrono::high_resolution_clock::now();
-    std::cout << "here" << std::endl;
     
 	while(true){
 
@@ -208,6 +209,9 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
 		}
 
 		iter++;
+        //end = chrono::high_resolution_clock::now();
+        //cout << "TIME = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-end_phase1).count()<<"\n";
+        //std::cout << "wor" << std::endl;
 	}
     end = chrono::high_resolution_clock::now();
 
@@ -298,10 +302,10 @@ int main()//int argc, char *argv[])
 	//}
 	srand(741);//atoi(argv[1]));
 
-    std::ifstream dataFile("../datasets/drybeans.txt");
+    std::ifstream dataFile("../datasets/dataset50K.txt");
 
 
-    //std::ifstream dataFile("../../../exchange/datasets/dataset_5000000.txt");
+    //std::ifstream dataFile("../../../exchange/datasets/dataset_50000000.txt");
 
     
     int total_points, numDimensions, K, max_iterations;
