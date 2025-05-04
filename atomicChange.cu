@@ -27,13 +27,24 @@ using namespace std;
 
 __global__ void findClusters(double *devicePoints, double *deviceClusters, double *deviceClustersTotals, int *deviceClusterAssignments, int *clusterAmount, int numDimensions, int numClusters, int numPoints){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx == 0){
+        atomicExch(&clusterAmount[numClusters], 0);
+    }
+
+    //this is faster but has to be static just remember to make this more than the num of dimensions sohoudl be good at 100
+    double pointVals[100];
 
     if(idx < numPoints){
+        for(int i = 0; i < numDimensions; i++){
+            pointVals[i] = devicePoints[idx * numDimensions + i];
+        }
+
+
         double sum = 0.0, min_dist;
         int id_cluster_center = 0;
 
         for(int i = 0; i < numDimensions; i++){
-            sum += powf(deviceClusters[i] - devicePoints[idx * numDimensions + i] , 2);
+            sum += powf(deviceClusters[i] - pointVals[i], 2);
         }
 
         min_dist = sum;
@@ -43,7 +54,7 @@ __global__ void findClusters(double *devicePoints, double *deviceClusters, doubl
             sum = 0.0;
 
             for(int j = 0; j < numDimensions; j++){
-                sum += powf(deviceClusters[i * numDimensions + j] - devicePoints[idx * numDimensions + j] , 2);
+                sum += powf(deviceClusters[i * numDimensions + j] - pointVals[j] , 2);
             }
 
             dist = sum;
@@ -55,72 +66,39 @@ __global__ void findClusters(double *devicePoints, double *deviceClusters, doubl
         }
         int id_old = deviceClusterAssignments[idx];
         if(id_old != id_cluster_center){
+            deviceClusterAssignments[idx] = id_cluster_center;
+
             for(int i = 0; i < numDimensions; i++){
-                atomicAdd(&deviceClustersTotals[id_cluster_center * numDimensions + i], devicePoints[idx * numDimensions + i]);
+                atomicAdd(&deviceClustersTotals[id_cluster_center * numDimensions + i], pointVals[i]);
             }
             atomicAdd(&clusterAmount[id_cluster_center], 1);
 
-            deviceClusterAssignments[idx] = id_cluster_center;
             if(id_old != -1){
                 for(int i = 0; i < numDimensions; i++){
-                    atomicAdd(&deviceClustersTotals[id_old * numDimensions + i], (-1 * devicePoints[idx * numDimensions + i]));
+                    atomicAdd(&deviceClustersTotals[id_old * numDimensions + i], (-1.0 * pointVals[i]));
                 }
-                atomicAdd(&clusterAmount[id_cluster_center], -1);
+                atomicAdd(&clusterAmount[id_old], -1);
             }
+
             atomicExch(&clusterAmount[numClusters], 1);
-            //printf("clustr change: %d\n", changedCluster[numClusters]);
-
-            //atomicAdd(&data[0], 1.0f);
         }
     }
-
-    __syncthreads();
-
+    //__syncthreads();
     //future - make sure you check the number of threads is enough and make it numdimensions * numclusters if that is greater than num of points 
-
-    int totalAmount = numDimensions * numClusters;
-    if(idx < totalAmount){
-        deviceClusters[idx] = deviceClustersTotals[idx] / clusterAmount[idx / numDimensions];// 6/5=1 17/5=
-    }
-    
-
-
 }
-//calculateClusterCenter<<<1, 4>>>(devicePoints, deviceClusterAssignments, deviceClusters, numDimensions, K, totalPoints);
-/*
-__global__ void calculateClusterCenter(double *devicePoints, int *deviceClusterAssignments, double *deviceClusters, int *clusterAmount, int numDimensions, int numClusters, int numPoints){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	int counter = 0;
-	
-    if(idx < numClusters){
-        if(changedCluster[idx] == 1){
-            for(int i = 0; i < numPoints; i++){
-                if(deviceClusterAssignments[i] == idx){
-                    for(int j = 0; j < numDimensions; j++){
-                        if(counter == 0){
-                            deviceClusters[idx * numDimensions + j] = 0;
-                        }
-                        deviceClusters[idx * numDimensions + j] += devicePoints[i * numDimensions + j];
-                    }
-                    counter++;
-                }
-            }
-            if(counter > 0){
-                for(int i = 0; i < numDimensions; i++){
-                    deviceClusters[idx * numDimensions + i] = deviceClusters[idx * numDimensions + i] / (counter * 1.0);
-                }
-            }
-            changedCluster[idx] = 0;
-        }
-    }
-    if(idx == 0){
-        changedCluster[numClusters] = 0;
-    }
-}*/
 
-//kmeansRun(points, total_points, numDimensions, K, max_iterations);
+__global__ void calculations(double *deviceClusters, double *deviceClustersTotals, int *clusterAmount, int numDimensions, int numClusters){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int totalAmount = numDimensions * numClusters;
+    int clusterSpecificDim = idx / numDimensions;
+
+    if(idx < totalAmount){
+        deviceClusters[idx] = deviceClustersTotals[idx] / clusterAmount[clusterSpecificDim];// 6/5=1 17/5=
+        //printf("val: %f = %f / %d\n", deviceClusters[idx], deviceClustersTotals[idx], clusterAmount[clusterSpecificDim]);
+    }
+}
+
 void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int max_iterations){
-    //auto begin = chrono::high_resolution_clock::now();
     auto begin = chrono::high_resolution_clock::now();
     auto end_phase1 = chrono::high_resolution_clock::now();
     auto end = chrono::high_resolution_clock::now();
@@ -130,26 +108,21 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     begin = chrono::high_resolution_clock::now();
     int pointsLengthNeeded = numDimensions * totalPoints;
 
-    std::cout << "hello?" << std::endl;
-    //double pointsArray[pointsLengthNeeded];
-
-    //for(int i = 0; i < totalPoints; i++){
-    //    for(int j = 0; j < numDimensions; j++){
-    //        pointsArray[i * numDimensions + j] = points[i][j];
-    //    }
-    //}
-	//for(int i = 0; i < pointsLengthNeeded; i++){
-	//	printf("%f ", pointsArray[i]);
-	//}
-
 	vector<int> prohibited_indexes;
+    std::cout << "here 2" << std::endl;
 
     int clustersLengthNeeded = numDimensions * K;
     double clustersArray[clustersLengthNeeded];
-    double clustersArrayTotals[clustersLengthNeeded] = {0};
-    int clustersAmountPoints[K+1] = {0};
+    double clustersArrayTotals[clustersLengthNeeded];
+    int clustersAmountPoints[K+1];
+    std::cout << "here 3.1" << std::endl;
+    int clusterAssignments[totalPoints];
+    std::cout << "here 3" << std::endl;
 
-	// choose K distinct values for the centers of the clusters
+    for(int i = 0; i < totalPoints; i++){
+        clusterAssignments[i] = -1;
+    }
+
 	for(int i = 0; i < K; i++){
 		while(true){
 			int index_point = rand() % totalPoints;
@@ -158,29 +131,22 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
                 for(int j = 0; j < numDimensions; j++){
                     clustersArray[i * numDimensions + j] = points[index_point * numDimensions + j];
                     clustersArrayTotals[i * numDimensions + j] = points[index_point * numDimensions + j];
-                    clustersAmountPoints[i] = 1;
                 }
+                clustersAmountPoints[i] = 1;
+                clusterAssignments[index_point] = i;
 				break;
 			}
 		}
 	}
-	//printf("cluster 0: %d\n", prohibited_indexes[0]);
-	//printf("cluster 1: %d\n", prohibited_indexes[1]);
-
-    //printf("what is happening %d", 1);
-    std::cout << "hello?" << std::endl;
 
 	int iter = 1;
 
-    //int pointsLengthNeeded = numDimensions * numPoints;
-    //int clustersLengthNeeded = numDimensions * numClusters;
-    //double pointsArray[pointsLengthNeeded];
-    //double clustersArray[clustersLengthNeeded];
     double *devicePoints;
     double *deviceClusters;
     double *deviceClustersTotals;
     int *deviceClusterAssignments;
     int *clusterAmount;
+    std::cout << "here" << std::endl;
 
     cudaMalloc((void**)&devicePoints, pointsLengthNeeded * sizeof(double));
     cudaMalloc((void**)&deviceClusters, clustersLengthNeeded * sizeof(double));
@@ -192,6 +158,7 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     cudaMemcpy(deviceClusters, clustersArray, clustersLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(deviceClustersTotals, clustersArrayTotals, clustersLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(clusterAmount, clustersAmountPoints, (K+1) * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(deviceClusterAssignments, clusterAssignments, totalPoints * sizeof(int), cudaMemcpyHostToDevice);
     //cudaMemcpy(clusterAssignments, returnClusterNum, totalPoints * sizeof(int), cudaMemcpyDeviceToHost);
     int numBlocksPoints = 1;
     int threadPoints = 1024;
@@ -200,32 +167,31 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     } else {
         threadPoints = totalPoints;
     }
-    /*
+    
+    int threadsNeededSecondKernel = numDimensions * K;
     int numBlocksClusters = 1;
     int threadClusters = 1024;
-    if(K > 1024){
-        numBlocksClusters = K / 1024 + 1;
+    if(threadsNeededSecondKernel > 1024){
+        numBlocksClusters = threadsNeededSecondKernel / 1024 + 1;
     } else {
-        threadClusters = K;
-    }*/
+        threadClusters = threadsNeededSecondKernel;
+    }
     int testChange[K+1];
 
     end_phase1 = chrono::high_resolution_clock::now();
-    cout << "TIME PHASE 1 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end_phase1-begin).count()<<"\n";
+    std::cout << "here" << std::endl;
     
-   //end_phase1 = chrono::high_resolution_clock::now();
-    std::cout << "hello?" << std::endl;
-    //
 	while(true){
-        begin = chrono::high_resolution_clock::now();
-        //printf("block: %d\n",numBlocksPoints);
-        //printf("thread: %d\n",threadPoints);
-        //begin = chrono::high_resolution_clock::now();
+
         findClusters<<<numBlocksPoints, threadPoints>>>(devicePoints, deviceClusters, deviceClustersTotals, deviceClusterAssignments, clusterAmount, numDimensions, K, totalPoints);
 		cudaDeviceSynchronize();
-        //cudaMemcpyAsync(testChange, changedCluster, (K+1) * sizeof(int), cudaMemcpyDeviceToHost, stream);
-        end_phase1 = chrono::high_resolution_clock::now();
+        
         cudaMemcpy(testChange, clusterAmount, (K+1) * sizeof(int), cudaMemcpyDeviceToHost);
+        
+        //for(int i = 0; i < K; i++){
+        //    std::cout << testChange[i] << " ";
+        //}
+        //std::cout << "\n";
         
 
         if(testChange[K] == 0){
@@ -233,42 +199,32 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
             break;
         }
 
-		//calculateClusterCenter<<<numBlocksClusters, threadClusters>>>(devicePoints, deviceClusterAssignments, deviceClusters, clusterAmount, numDimensions, K, totalPoints);
-
+        calculations<<<numBlocksClusters, threadClusters>>>(deviceClusters, deviceClustersTotals, clusterAmount, numDimensions, K);
 		cudaDeviceSynchronize();
-
 
 		if(iter >= max_iterations){
 			cout << "Break in iteration " << iter << "\n";
 			break;
 		}
-        std::cout << "1 " << std::endl;
-
-        end = chrono::high_resolution_clock::now();
 
 		iter++;
-        cout << "Part 1 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end_phase1-begin).count()<<"\n";
-
-	    cout << "Part 2 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-end_phase1).count()<<"\n";
 	}
+    end = chrono::high_resolution_clock::now();
 
-    //end = chrono::high_resolution_clock::now();
-	double clustersNewCenter[clustersLengthNeeded];
-    cudaMemcpy(clustersNewCenter, deviceClusters, clustersLengthNeeded * sizeof(double), cudaMemcpyDeviceToHost);
-	//for(int i = 0; i < K; i++){
-    //    std::cout << "Cluster #" << i << ": ";
-    //    for(int j = 0; j < numDimensions; j++){
-    //        std::cout << clustersNewCenter[i * numDimensions + j] << " ";
-    //    }
-    //    std::cout << std::endl;
-    //}
+    for(int i = 0; i < K; i++){
+        std::cout << testChange[i] << " ";
+    }
+    std::cout << "\n";
+
 	cudaFree(devicePoints);
     cudaFree(deviceClusters);
     cudaFree(deviceClusterAssignments);
+    cudaFree(deviceClustersTotals);
+    cudaFree(clusterAmount);
 
 	cout << "TOTAL EXECUTION TIME = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count()<<"\n";
 
-	//cout << "TIME PHASE 1 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end_phase1-begin).count()<<"\n";
+	cout << "TIME PHASE 1 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end_phase1-begin).count()<<"\n";
 
 	cout << "TIME PHASE 2 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-end_phase1).count()<<"\n";
     
@@ -304,43 +260,50 @@ double* read_points_csv(std::ifstream& dataFile, int total_points, int numDimens
     return data;
 }
 
+double* read_points_txt(std::ifstream& dataFile, int total_points, int numDimensions, bool has_name) {
+    // Allocate the data array for the points
+    double* data = (double*)malloc(sizeof(double) * total_points * numDimensions);
+
+    std::string line;
+    int point_index = 0;
+
+    // Process each subsequent line with point data
+    while (std::getline(dataFile, line) && point_index < total_points) {
+        // Use a stringstream to split by space
+        std::istringstream stream(line);
+        std::string token;
+
+        // Assign values to the flat array (row-major order)
+        for (int dim = 0; dim < numDimensions; dim++) {
+            stream >> token;
+            data[point_index * numDimensions + dim] = atof(token.c_str());
+        }
+
+        // Skip the name if present
+        if (has_name) {
+            // Move the stream past the name (not needed, just skips it)
+            stream >> token;
+        }
+
+        point_index++;
+    }
+
+    return data;
+}
+
 int main()//int argc, char *argv[])
 {
 	//if(argc == 0){
 	//	cout << "wow" << endl;
 	//}
 	srand(741);//atoi(argv[1]));
-    //std::ifstream dataFile("../datasets/dataset100000.txt");
-    //std::ifstream dataFile("../../../exchange/datasets/dataset_100000.txt");
-	//int total_points, numDimensions, K, max_iterations, has_name;
 
-	//dataFile >> total_points >> numDimensions >> K >> max_iterations >> has_name;
-
-	//std::vector<std::vector<double>> points;
-    //double* points = read_points_csv("data.csv", 100, 5, true);
-	//string point_name;
-	//for(int i = 0; i < total_points; i++){
-	//	vector<double> values;
-
-	//	for(int j = 0; j < numDimensions; j++){
-	//		double value;
-	//		dataFile >> value;
-	//		values.push_back(value);
-	//	}
-
-	//	if(has_name){
-	//		dataFile >> point_name;
-	//		points.push_back(values);
-	//	} else {
-	//		points.push_back(values);
-	//	}
-	//}
-
-    //std::ifstream dataFile("../datasets/dataset100000.txt");
+    std::ifstream dataFile("../datasets/drybeans.txt");
 
 
-    std::ifstream dataFile("../../../exchange/datasets/dataset_100000.txt");
+    //std::ifstream dataFile("../../../exchange/datasets/dataset_5000000.txt");
 
+    
     int total_points, numDimensions, K, max_iterations;
     bool has_name;
     dataFile >> total_points >> numDimensions >> K >> max_iterations >> has_name;
@@ -348,9 +311,10 @@ int main()//int argc, char *argv[])
     std::string skip_line;
     std::getline(dataFile, skip_line);
 
-    double* points = read_points_csv(dataFile, total_points, numDimensions, has_name);
+    //double* points = read_points_csv(dataFile, total_points, numDimensions, has_name);
+    double* points = read_points_txt(dataFile, total_points, numDimensions, has_name);
 
-    std::cout << "what is happening" << std::endl;
+    std::cout << "here" << std::endl;
 
     kmeansRun(points, total_points, numDimensions, K, max_iterations);
 
@@ -360,13 +324,11 @@ int main()//int argc, char *argv[])
 
     // Close the file
     dataFile.close();
-	//printf("%f\n", points[13610][15]);
-	/*
-	ifstream dataFile("fifa_final_no_id_dataset.csv");
-    if (!dataFile) {
-        cerr << "Error opening file!" << endl;
-        return 1;
-    }
+    
+
+    ///////////////////////////////////////////////////////////////////
+
+    /*
 
     int total_points, total_values, K, max_iterations, has_name;
     string line;
@@ -376,11 +338,11 @@ int main()//int argc, char *argv[])
     stringstream ss(line);
     string temp;
 
-    getline(ss, temp, ','); total_points = stoi(temp);
-    getline(ss, temp, ','); total_values = stoi(temp);
-    getline(ss, temp, ','); K = stoi(temp);
-    getline(ss, temp, ','); max_iterations = stoi(temp);
-    getline(ss, temp, ','); has_name = stoi(temp);
+    getline(ss, temp, ' '); total_points = stoi(temp);
+    getline(ss, temp, ' '); total_values = stoi(temp);
+    getline(ss, temp, ' '); K = stoi(temp);
+    getline(ss, temp, ' '); max_iterations = stoi(temp);
+    getline(ss, temp, ' '); has_name = stoi(temp);
 
     vector<Point> points;
     
