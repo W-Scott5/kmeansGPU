@@ -38,6 +38,8 @@ The following table compares the performance of the GPU-accelerated solution aga
 | 5,000,000   | 34349932 | 9910121  | 3.47x   |
 | 10,000,000  | 191186943| 46279899 | 4.13x   |
 
+Note: These are not the only tests I ran but these represent the main comparison between the programs and the improvements for the parallel gpu solution.
+
 As the data shows, the GPU solution provides a significant **speedup** over the CPU for larger datasets. The speedup factor increases as the number of data points grows, demonstrating the effectiveness of the parallel approach. The speedup is also very quick compared ot the sequential version in the repo. The sequential version is also the fastest version I could get sequentially. 
 
 There are definitely some improvements that could be made for all the different algorithms to optimize them even further. I appreciate you getting far in this repo and enjoying the analysis as much as I did. Have a good day!
