@@ -1,10 +1,6 @@
-// Implementation of the KMeans Algorithm
-// reference: https://github.com/marcoscastro/kmeans
-
-//change point and cluster to use a hashmap (unordered map) and maybe the vector clusters in kmeans
+// reference: https://github.com/marcoscastro/kmeans for starter structure
 
 #include <sstream>
-//#include <tbb/parallel_for.h>
 #include <iostream>
 #include <unordered_set>
 #include <vector>
@@ -21,17 +17,21 @@
 #include <cstring>
 using namespace std;
 
-//findClusters<<<1000, 1024>>>(devicePoints, deviceClusters, returnClusterNum, numDimensions, K, totalPoints);
-
-//literally have two arrays one wiht the sum and one with the actual value
-
+/*
+    Description: 
+        - A function for assigning the points to specific clusters based on euclidean distance calculations (with a bunch of optimizations that work for kmeans). As the function is assigning points,
+          it also keeps tracks of the totals for each cluster and the amount of points in each cluster to figure our their exact location after each iteration in the second function below.
+    Analysis: 
+        - This function uses euclidean distance for each point to calculate the shortest distance from each cluster then gets assigned to that cluster that is closest to it. It is optimized to
+          have a point per thread for speedup. Also, it gets rid of the sqrt calculations as we can jsut compare the totals without spending time to sqrt the numbers. The function then uses atomic
+          sums in each cluster to calculate the totals and amount of points in each cluster. This doesnt look good in theory for thread contention but it is more optimal than utilizing a lock based
+          system for the approach in our testing.
+*/
 __global__ void findClusters(double *devicePoints, double *deviceClusters, double *deviceClustersTotals, int *deviceClusterAssignments, int *clusterAmount, int numDimensions, int numClusters, int numPoints){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx == 0){
         atomicExch(&clusterAmount[numClusters], 0);
     }
-
-    //this is faster but has to be static just remember to make this more than the num of dimensions sohoudl be good at 100
     double pointVals[100];
 
     if(idx < numPoints){
@@ -83,9 +83,18 @@ __global__ void findClusters(double *devicePoints, double *deviceClusters, doubl
             atomicExch(&clusterAmount[numClusters], 1);
         }
     }
-    //__syncthreads();
-    //future - make sure you check the number of threads is enough and make it numdimensions * numclusters if that is greater than num of points 
 }
+
+
+/*
+    Description: 
+        - A function for doing the final cluster locations based on the totals and amount calculated in the findclusters function
+    
+    Analysis: 
+        - This function splits all the clusters dimension into having one dimension per thread. For example if there are 10 clusters having 5 dimensions,
+          then there would be 50 threads each calculating the exact decimal point location for that specific dimension in a specific cluster. This solution
+          maximizes parallelism and only takes as long as the max thread to do their division calculation.
+*/
 
 __global__ void calculations(double *deviceClusters, double *deviceClustersTotals, int *clusterAmount, int numDimensions, int numClusters){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -93,10 +102,18 @@ __global__ void calculations(double *deviceClusters, double *deviceClustersTotal
     int clusterSpecificDim = idx / numDimensions;
 
     if(idx < totalAmount){
-        deviceClusters[idx] = deviceClustersTotals[idx] / clusterAmount[clusterSpecificDim];// 6/5=1 17/5=
-        //printf("val: %f = %f / %d\n", deviceClusters[idx], deviceClustersTotals[idx], clusterAmount[clusterSpecificDim]);
+        deviceClusters[idx] = deviceClustersTotals[idx] / clusterAmount[clusterSpecificDim];
     }
 }
+
+/*
+    Description: 
+        - A function for putting all the kmeans operations together in the kernals and iterating through until no point changes their assigned cluster or if the maximum put in the data file is reached.
+    Analysis: 
+        - This function sets up all the points and to their designated cuda arrays to be transferred to gpu memory. All the arrays are flatened for this process to maximize efficiency. The function then
+          assigns random points to be the starting clusters. We could have used k++ ideas and further optimized clusters at the start to be efficient and involve
+          less calculation cycles where the points are changing clusters. The function then loops through each iteration until the boolean of no changes is true then it breaks and outputs the result and times it took.
+*/
 
 void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int max_iterations){
     auto begin = chrono::high_resolution_clock::now();
@@ -109,16 +126,12 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     int pointsLengthNeeded = numDimensions * totalPoints;
 
 	vector<int> prohibited_indexes;
-    //std::cout << "here 2" << std::endl;
 
     int clustersLengthNeeded = numDimensions * K;
     double clustersArray[clustersLengthNeeded];
     double clustersArrayTotals[clustersLengthNeeded];
     int clustersAmountPoints[K+1];
-    //std::cout << "here 3.1" << std::endl;
     int* clusterAssignments = (int*)malloc(totalPoints * sizeof(int));
-    //int clusterAssignments[totalPoints];
-    //std::cout << "here 3" << std::endl;
 
     for(int i = 0; i < totalPoints; i++){
         clusterAssignments[i] = -1;
@@ -147,20 +160,19 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     double *deviceClustersTotals;
     int *deviceClusterAssignments;
     int *clusterAmount;
-    //std::cout << "here" << std::endl;
 
     cudaMalloc((void**)&devicePoints, pointsLengthNeeded * sizeof(double));
     cudaMalloc((void**)&deviceClusters, clustersLengthNeeded * sizeof(double));
     cudaMalloc((void**)&deviceClustersTotals, clustersLengthNeeded * sizeof(double));
     cudaMalloc((void**)&deviceClusterAssignments, totalPoints * sizeof(int));
-    cudaMalloc((void**)&clusterAmount, (K+1) * sizeof(int));//the last one is use to tell if there r change or not
+    cudaMalloc((void**)&clusterAmount, (K+1) * sizeof(int));
 	
     cudaMemcpy(devicePoints, points, pointsLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(deviceClusters, clustersArray, clustersLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(deviceClustersTotals, clustersArrayTotals, clustersLengthNeeded * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(clusterAmount, clustersAmountPoints, (K+1) * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(deviceClusterAssignments, clusterAssignments, totalPoints * sizeof(int), cudaMemcpyHostToDevice);
-    //cudaMemcpy(clusterAssignments, returnClusterNum, totalPoints * sizeof(int), cudaMemcpyDeviceToHost);
+    
     int numBlocksPoints = 1;
     int threadPoints = 1024;
     if(totalPoints > 1024){
@@ -179,21 +191,13 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     }
     int testChange[K+1];
 
-    //std::cout << "here" << std::endl;
     end_phase1 = chrono::high_resolution_clock::now();
     
 	while(true){
-
         findClusters<<<numBlocksPoints, threadPoints>>>(devicePoints, deviceClusters, deviceClustersTotals, deviceClusterAssignments, clusterAmount, numDimensions, K, totalPoints);
 		cudaDeviceSynchronize();
         
         cudaMemcpy(testChange, clusterAmount, (K+1) * sizeof(int), cudaMemcpyDeviceToHost);
-        
-        //for(int i = 0; i < K; i++){
-        //    std::cout << testChange[i] << " ";
-        //}
-        //std::cout << "\n";
-        
 
         if(testChange[K] == 0){
             cout << "Break in iteration " << iter << "\n";
@@ -209,9 +213,6 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
 		}
 
 		iter++;
-        //end = chrono::high_resolution_clock::now();
-        //cout << "TIME = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-end_phase1).count()<<"\n";
-        //std::cout << "wor" << std::endl;
 	}
     end = chrono::high_resolution_clock::now();
 
@@ -226,87 +227,67 @@ void kmeansRun(double* points, int totalPoints, int numDimensions, int K, int ma
     cudaFree(deviceClustersTotals);
     cudaFree(clusterAmount);
 
-	cout << "TOTAL EXECUTION TIME = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count()<<"\n";
+	cout << "Total Execution Time = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count()<<"\n";
 
-	cout << "TIME PHASE 1 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end_phase1-begin).count()<<"\n";
+	cout << "Time Phase 1 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end_phase1-begin).count()<<"\n";
 
-	cout << "TIME PHASE 2 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-end_phase1).count()<<"\n";
+	cout << "Time Phase 2 = "<<std::chrono::duration_cast<std::chrono::microseconds>(end-end_phase1).count()<<"\n";
     
 }
 
+//A method for reading csv files for kmeans point and cluster amounts/data
 double* read_points_csv(std::ifstream& dataFile, int total_points, int numDimensions, bool has_name) {
-    // Allocate the data array for the points
+    
     double* data = (double*)malloc(sizeof(double) * total_points * numDimensions);
-
     std::string line;
     int point_index = 0;
 
-    // Process each subsequent line with point data
     while (std::getline(dataFile, line) && point_index < total_points) {
-        // Split the line into components
         char* token = strtok(const_cast<char*>(line.c_str()), ",");
-        
-        // Assign values to the flat array (row-major order)
+
         for (int dim = 0; dim < numDimensions; dim++) {
             data[point_index * numDimensions + dim] = atof(token);
             token = strtok(nullptr, ",");
         }
 
-        // Skip the name if present
         if (has_name) {
-            // Move the token past the name (not needed, just skips it)
             token = strtok(nullptr, ",");
         }
-
         point_index++;
     }
 
     return data;
 }
 
+//A method for reading text files for kmeans point and cluster amounts/data
 double* read_points_txt(std::ifstream& dataFile, int total_points, int numDimensions, bool has_name) {
-    // Allocate the data array for the points
-    double* data = (double*)malloc(sizeof(double) * total_points * numDimensions);
 
+    double* data = (double*)malloc(sizeof(double) * total_points * numDimensions);
     std::string line;
     int point_index = 0;
 
-    // Process each subsequent line with point data
     while (std::getline(dataFile, line) && point_index < total_points) {
-        // Use a stringstream to split by space
+
         std::istringstream stream(line);
         std::string token;
 
-        // Assign values to the flat array (row-major order)
         for (int dim = 0; dim < numDimensions; dim++) {
             stream >> token;
             data[point_index * numDimensions + dim] = atof(token.c_str());
         }
 
-        // Skip the name if present
         if (has_name) {
-            // Move the stream past the name (not needed, just skips it)
             stream >> token;
         }
-
         point_index++;
     }
-
     return data;
 }
 
-int main()//int argc, char *argv[])
-{
-	//if(argc == 0){
-	//	cout << "wow" << endl;
-	//}
-	srand(741);//atoi(argv[1]));
+int main(){
 
+	srand(741); //using 741 for consistent test but also tested with many other random values for correctness 
     std::ifstream dataFile("../datasets/dataset50K.txt");
-
-
-    //std::ifstream dataFile("../../../exchange/datasets/dataset_50000000.txt");
-
     
     int total_points, numDimensions, K, max_iterations;
     bool has_name;
@@ -314,64 +295,12 @@ int main()//int argc, char *argv[])
 
     std::string skip_line;
     std::getline(dataFile, skip_line);
-
-    //double* points = read_points_csv(dataFile, total_points, numDimensions, has_name);
     double* points = read_points_txt(dataFile, total_points, numDimensions, has_name);
-
-    std::cout << "here" << std::endl;
 
     kmeansRun(points, total_points, numDimensions, K, max_iterations);
 
-    // Example usage: Access point data like points[i * numDimensions + j]
-    // Free the allocated memory after use
     free(points);
-
-    // Close the file
     dataFile.close();
-    
-
-    ///////////////////////////////////////////////////////////////////
-
-    /*
-
-    int total_points, total_values, K, max_iterations, has_name;
-    string line;
-
-    // Read the first line (metadata)
-    getline(dataFile, line);
-    stringstream ss(line);
-    string temp;
-
-    getline(ss, temp, ' '); total_points = stoi(temp);
-    getline(ss, temp, ' '); total_values = stoi(temp);
-    getline(ss, temp, ' '); K = stoi(temp);
-    getline(ss, temp, ' '); max_iterations = stoi(temp);
-    getline(ss, temp, ' '); has_name = stoi(temp);
-
-    vector<Point> points;
-    
-    for (int i = 0; i < total_points; i++) {
-        if (!getline(dataFile, line)) break;
-        stringstream ss(line);
-        vector<double> values;
-        
-        for (int j = 0; j < total_values; j++) {
-            if (!getline(ss, temp, ',')) break;
-            values.push_back(stod(temp));
-        }
-
-        string point_name = "";
-        if (has_name && getline(ss, point_name, ',')) {
-            points.emplace_back(i, values, point_name);
-        } else {
-            points.emplace_back(i, values);
-        }
-    }*/
-
-	//KMeans kmeans(K, total_points, total_values, max_iterations);
-	//kmeans.run(points);
-
-	//kmeansRun(points, total_points, numDimensions, K, max_iterations);
 
 	return 0;
 }
